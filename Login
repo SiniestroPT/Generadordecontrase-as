@@ -1,0 +1,354 @@
+import random
+import string
+import requests
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QLineEdit, QVBoxLayout, QPushButton, 
+    QDateEdit, QFileDialog, QMessageBox, QStackedWidget, QHBoxLayout
+)
+from PyQt5.QtGui import QFont, QPixmap, QIcon
+from PyQt5.QtCore import Qt, QDate
+from qt_material import apply_stylesheet
+from generador import PasswordGeneratorApp  # Importamos el generador
+import json
+
+class LoginApp(QWidget):
+    def __init__(self, stack):
+        super().__init__()
+        self.setWindowTitle("Login")
+        
+        self.setGeometry(100, 100, 600, 400)
+        self.stack = stack  # Stack para navegar entre Login, Registro y Cambio de Contraseña
+
+        # Estilos
+        font_title = QFont("Poppins", 24, QFont.Bold)
+        font_input = QFont("Poppins", 14)
+        font_button = QFont("Poppins", 16, QFont.Bold)
+
+        # Título
+        self.title_label = QLabel("🔐 Iniciar Sesión")
+        self.title_label.setFont(font_title)
+        self.title_label.setAlignment(Qt.AlignCenter)
+
+        # Campo de nombre
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Nombre")
+        self.name_input.setFont(font_input)
+
+        # Campo de contraseña con botón para mostrar/ocultar
+        self.password_input = QLineEdit(self)
+        self.password_input.setPlaceholderText("Contraseña")
+        self.password_input.setFont(font_input)
+        self.password_input.setEchoMode(QLineEdit.Password)
+
+        self.show_password_btn = QPushButton(self)
+        self.show_password_btn.setIcon(QIcon("esconder.png"))  # Coloca tu icono aquí
+        self.show_password_btn.setCheckable(True)
+        self.show_password_btn.setFixedSize(40, 40)
+        self.show_password_btn.toggled.connect(self.toggle_password_visibility)
+
+        # Layout para el campo de contraseña y el botón de ver
+        password_layout = QHBoxLayout()
+        password_layout.addWidget(self.password_input)
+        password_layout.addWidget(self.show_password_btn)
+
+        # Botón de Login
+        self.login_btn = QPushButton("Iniciar Sesión")
+        self.login_btn.setFont(font_button)
+        self.login_btn.clicked.connect(self.login_user)
+
+        # Botón para cambiar contraseña
+        self.change_password_btn = QPushButton("¿Desea cambiar la contraseña?")
+        self.change_password_btn.setFont(font_button)
+        self.change_password_btn.clicked.connect(self.open_change_password)
+
+        # Botón para cambiar a Registro
+        self.switch_to_register_btn = QPushButton("¿No tienes cuenta? Regístrate")
+        self.switch_to_register_btn.setFont(font_button)
+        self.switch_to_register_btn.clicked.connect(self.open_register)
+
+        # Layout principal
+        layout = QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.name_input)
+        layout.addLayout(password_layout)
+        layout.addWidget(self.login_btn)
+        layout.addWidget(self.change_password_btn)
+        layout.addWidget(self.switch_to_register_btn)
+        self.setLayout(layout)
+
+    def toggle_password_visibility(self, checked):
+        """Alterna la visibilidad de la contraseña."""
+        if checked:
+            self.password_input.setEchoMode(QLineEdit.Normal)
+            self.show_password_btn.setIcon(QIcon("esconder.png"))  # Icono para ocultar
+        else:
+            self.password_input.setEchoMode(QLineEdit.Password)
+            self.show_password_btn.setIcon(QIcon("esconder.png"))  # Icono para mostrar
+
+    def login_user(self):
+        """Envía los datos de login a PHP y registra el log."""
+        name = self.name_input.text()
+        password = self.password_input.text()
+
+        log_data = {
+            "nombre": name,
+            "contraseña": password
+        }
+
+        try:
+            # Hacemos la solicitud al servidor
+            response = requests.post("http://localhost/python/loginpython.php", data=log_data)
+
+            # Guardamos los datos enviados y recibidos en un archivo de log
+            self.create_log(log_data, response)
+
+            if response.status_code != 200:
+                QMessageBox.critical(self, "Error", "Error en el servidor: " + response.text)
+                return
+
+            # Intentamos convertir la respuesta a JSON
+            try:
+                data = response.json()
+                print(data)  # <-- Agregado para depuración en consola
+
+                if "id" in data:
+                    QMessageBox.information(self, "Inicio de Sesión", data["mensaje"])
+                    self.open_generator(data["id"])  # Abrimos el generador con el ID del usuario
+                elif "error" in data:
+                    QMessageBox.warning(self, "Error", data["error"])
+                else:
+                    QMessageBox.critical(self, "Error", "Respuesta inesperada del servidor.")
+            except ValueError:
+                QMessageBox.critical(self, "Error", "No se pudo leer la respuesta del servidor.")
+
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+    def create_log(self, sent_data, response):
+        """Crea un archivo de log con los datos enviados y la respuesta recibida."""
+        with open("login_log.txt", "w") as f:
+            f.write("Datos enviados:\n")
+            f.write(json.dumps(sent_data, indent=4) + "\n\n")
+            f.write("Respuesta del servidor:\n")
+            f.write(f"Status Code: {response.status_code}\n")
+            f.write(response.text)
+
+    def open_generator(self, user_id):
+        """Abre el generador de contraseñas con el ID del usuario."""
+        self.generator_window = PasswordGeneratorApp(user_id)  # Pasamos el ID del usuario
+        self.generator_window.show()
+        self.close()  # Cerramos la ventana de login
+
+    def open_register(self):
+        """Cambia a la pantalla de registro."""
+        self.stack.setCurrentIndex(1)  # Cambia al registro
+
+    def open_change_password(self):
+        """Cambia a la pantalla de cambio de contraseña."""
+        self.stack.setCurrentIndex(2)
+
+
+class RegisterApp(QWidget):
+    def __init__(self, stack):
+        super().__init__()
+        self.setWindowTitle("Registro de Usuario")
+        self.setGeometry(100, 100, 600, 600)
+        self.stack = stack  # Stack para navegar entre Login y Registro
+
+        # Estilos
+        font_title = QFont("Poppins", 24, QFont.Bold)
+        font_input = QFont("Poppins", 14)
+        font_button = QFont("Poppins", 16, QFont.Bold)
+
+        # Título
+        self.title_label = QLabel("📝 Registro")
+        self.title_label.setFont(font_title)
+        self.title_label.setAlignment(Qt.AlignCenter)
+
+        # Campos de Registro
+        self.name_input = self.create_input("Nombre", font_input)
+        self.paternal_lastname_input = self.create_input("Apellido Paterno", font_input)
+        self.maternal_lastname_input = self.create_input("Apellido Materno", font_input)
+
+        self.birthdate_input = QDateEdit(self)
+        self.birthdate_input.setCalendarPopup(True)
+        self.birthdate_input.setDate(QDate.currentDate())
+        self.birthdate_input.setFont(font_input)
+
+        # Campo de contraseña deshabilitado para evitar edición manual
+        self.password_input = QLineEdit(self)
+        self.password_input.setPlaceholderText("Contraseña")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.password_input.setEnabled(False)  # Deshabilitar el campo de entrada
+
+        # Botón para mostrar/ocultar contraseña
+        self.show_password_btn = QPushButton(self)
+        self.show_password_btn.setIcon(QIcon("esconder.png"))
+        self.show_password_btn.setCheckable(True)
+        self.show_password_btn.setFixedSize(40, 40)
+        self.show_password_btn.toggled.connect(self.toggle_password_visibility)
+
+        # Layout para la contraseña y el botón de ver
+        password_layout = QHBoxLayout()
+        password_layout.addWidget(self.password_input)
+        password_layout.addWidget(self.show_password_btn)
+
+        # Botón para generar contraseña
+        self.generate_password_btn = QPushButton("Generar Contraseña")
+        self.generate_password_btn.setFont(font_button)
+        self.generate_password_btn.clicked.connect(self.generate_password)
+
+        # Botón de Registro
+        self.register_btn = QPushButton("Registrar")
+        self.register_btn.setFont(font_button)
+        self.register_btn.clicked.connect(self.register_user)
+
+        # Layout principal
+        layout = QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.name_input)
+        layout.addWidget(self.paternal_lastname_input)
+        layout.addWidget(self.maternal_lastname_input)
+        layout.addWidget(self.birthdate_input)
+        layout.addLayout(password_layout)
+        layout.addWidget(self.generate_password_btn)
+        layout.addWidget(self.register_btn)
+        self.setLayout(layout)
+
+    def toggle_password_visibility(self, checked):
+        """Alterna la visibilidad de la contraseña."""
+        if checked:
+            self.password_input.setEchoMode(QLineEdit.Normal)
+            self.show_password_btn.setIcon(QIcon("esconder.png"))
+        else:
+            self.password_input.setEchoMode(QLineEdit.Password)
+            self.show_password_btn.setIcon(QIcon("esconder.png"))
+
+    def create_input(self, placeholder, font):
+        """Crea un campo de entrada."""
+        input_field = QLineEdit(self)
+        input_field.setPlaceholderText(placeholder)
+        input_field.setFont(font)
+        return input_field
+
+    def generate_password(self):
+        """Genera una contraseña segura y la coloca en el campo de contraseña."""
+        length = random.randint(16, 20)
+        characters = string.ascii_letters + string.digits + string.punctuation
+        password = ''.join(random.choices(characters, k=length))
+        self.password_input.setText(password)
+        self.password_input.setEnabled(True)  # Habilita el campo de contraseña para mostrarla
+
+    def register_user(self):
+        """Envía los datos del registro a PHP si la contraseña está generada."""
+        if not self.password_input.text():
+            QMessageBox.warning(self, "Error", "Debe generar una contraseña antes de registrarse.")
+            return
+
+        data = {
+            'nombre': self.name_input.text(),
+            'apellido_paterno': self.paternal_lastname_input.text(),
+            'apellido_materno': self.maternal_lastname_input.text(),
+            'fecha_nacimiento': self.birthdate_input.text(),
+            'contraseña': self.password_input.text()
+        }
+
+        response = requests.post("http://localhost/python/registropython.php", data=data)
+
+        if response.status_code == 200:
+            QMessageBox.information(self, "Registro", response.text)
+            self.stack.setCurrentIndex(0)
+        else:
+            QMessageBox.critical(self, "Error", f"Error en el registro: {response.text}")
+
+
+
+class ChangePasswordApp(QWidget):
+    def __init__(self, stack):
+        super().__init__()
+        self.setWindowTitle("Cambiar Contraseña")
+        self.setGeometry(100, 100, 600, 400)
+        self.stack = stack
+
+        font_title = QFont("Poppins", 24, QFont.Bold)
+        font_input = QFont("Poppins", 14)
+        font_button = QFont("Poppins", 16, QFont.Bold)
+
+        self.title_label = QLabel("🔄 Cambiar Contraseña")
+        self.title_label.setFont(font_title)
+        self.title_label.setAlignment(Qt.AlignCenter)
+
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Nombre de Usuario")
+        self.name_input.setFont(font_input)
+
+        self.old_password_input = QLineEdit(self)
+        self.old_password_input.setPlaceholderText("Contraseña Anterior")
+        self.old_password_input.setEchoMode(QLineEdit.Password)
+        self.old_password_input.setFont(font_input)
+
+        self.new_password_input = QLineEdit(self)
+        self.new_password_input.setPlaceholderText("Nueva Contraseña (Visible)")
+        self.new_password_input.setFont(font_input)  # Sin ocultar la nueva contraseña
+        self.generate_password()
+
+        self.generate_password_btn = QPushButton("Generar Nueva Contraseña")
+        self.generate_password_btn.setFont(font_button)
+        self.generate_password_btn.clicked.connect(self.generate_password)
+
+        self.change_password_btn = QPushButton("Cambiar Contraseña")
+        self.change_password_btn.setFont(font_button)
+        self.change_password_btn.clicked.connect(self.change_password)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.name_input)
+        layout.addWidget(self.old_password_input)
+        layout.addWidget(self.new_password_input)
+        layout.addWidget(self.generate_password_btn)
+        layout.addWidget(self.change_password_btn)
+        self.setLayout(layout)
+
+    def generate_password(self):
+        """Genera una contraseña segura automáticamente."""
+        length = random.randint(16, 20)
+        characters = string.ascii_letters + string.digits + string.punctuation
+        password = ''.join(random.choices(characters, k=length))
+        self.new_password_input.setText(password)
+
+    def change_password(self):
+        """Envía los datos de cambio de contraseña a PHP."""
+        data = {
+            "nombre": self.name_input.text(),
+            "contrasena_anterior": self.old_password_input.text(),
+            "nueva_contrasena": self.new_password_input.text()
+        }
+
+        try:
+            response = requests.post("http://localhost/python/cambiar_contrasena.php", data=data)
+            if response.status_code == 200:
+                QMessageBox.information(self, "Cambio de Contraseña", response.text)
+                self.stack.setCurrentIndex(0)  # Regresar al login si es exitoso
+            else:
+                QMessageBox.critical(self, "Error", "Error en el servidor: " + response.text)
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    apply_stylesheet(app, theme='dark_teal.xml')
+
+    stack = QStackedWidget()
+    login = LoginApp(stack)
+    register = RegisterApp(stack)
+    change_password = ChangePasswordApp(stack)
+
+    stack.addWidget(login)
+    stack.addWidget(register)
+    stack.addWidget(change_password)
+    stack.setCurrentIndex(0)
+
+    stack.show()
+    sys.exit(app.exec_())
