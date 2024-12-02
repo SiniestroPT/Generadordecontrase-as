@@ -1,0 +1,232 @@
+import sys
+import random
+import string
+import subprocess  # Para abrir el gestor de contraseñas
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QLineEdit, QVBoxLayout, QPushButton,
+    QComboBox, QMessageBox, QDateEdit, QHBoxLayout, QSpacerItem, QSizePolicy, QInputDialog
+)
+from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QDate
+from qt_material import apply_stylesheet
+import requests
+
+# 500 palabras tipo XKCD generadas aleatoriamente
+xkcd_palabras = [
+    ''.join(random.choice(string.ascii_letters + string.punctuation) 
+            for _ in range(random.randint(5, 10)))
+    for _ in range(500)
+]
+
+class PasswordGeneratorApp(QWidget):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id  # Guardamos el ID del usuario
+        self.setWindowTitle(f"Generador de Contraseñas - Usuario {user_id}")
+        self.setGeometry(100, 100, 600, 900)
+
+        # Estilo de fuente
+        font_title = QFont("Poppins", 28, QFont.Bold)
+        font_label = QFont("Poppins", 16)
+        font_input = QFont("Poppins", 14)
+        font_button = QFont("Poppins", 16, QFont.Bold)
+
+        # Título
+        self.title_label = QLabel("🔒 Generador de Contraseñas Seguras")
+        self.title_label.setFont(font_title)
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("margin-bottom: 20px;")
+
+        # Botón Gestor de Contraseñas
+        self.password_manager_btn = QPushButton("Gestor de Contraseñas")
+        self.password_manager_btn.setFont(font_button)
+        self.password_manager_btn.clicked.connect(self.open_password_manager)
+
+        # Agregamos el botón al layout
+        # Crear los campos de entrada
+        self.name_input = self.create_input("Nombre", font_input)
+        self.paternal_lastname_input = self.create_input("Apellido Paterno", font_input)
+        self.maternal_lastname_input = self.create_input("Apellido Materno", font_input)
+        self.song_input = self.create_input("Canción Favorita", font_input)
+        self.pet_input = self.create_input("Nombre de Mascota", font_input)
+
+        # Campo de fecha con calendario emergente
+        self.birthdate_label = QLabel("La fecha que sea", self)
+        self.birthdate_label.setFont(font_label)
+        self.birthdate_input = QDateEdit(self)
+        self.birthdate_input.setCalendarPopup(True)
+        self.birthdate_input.setDate(QDate.currentDate())
+        self.birthdate_input.setDisplayFormat("dd-MM-yyyy")
+        self.birthdate_input.setFont(font_input)
+        self.birthdate_input.setStyleSheet("padding: 10px;")
+
+        # Longitud de la contraseña
+        self.length_label = QLabel("Longitud de la Contraseña", self)
+        self.length_label.setFont(font_label)
+        self.password_length = QComboBox(self)
+        self.password_length.addItems(["12", "16", "20"])
+        self.password_length.setFont(font_input)
+
+        # Botones para generar contraseñas
+        button_layout = QHBoxLayout()
+        self.generate_btn = QPushButton("Generar Contraseña")
+        self.generate_xkcd_btn = QPushButton("Generar Contraseña XKCD")
+        self.generate_btn.setFont(font_button)
+        self.generate_xkcd_btn.setFont(font_button)
+        self.generate_btn.setStyleSheet("margin: 10px;")
+        self.generate_xkcd_btn.setStyleSheet("margin: 10px;")
+        self.generate_btn.clicked.connect(self.generate_password)
+        self.generate_xkcd_btn.clicked.connect(self.generate_xkcd_password)
+
+        button_layout.addWidget(self.generate_btn)
+        button_layout.addWidget(self.generate_xkcd_btn)
+
+        # Resultado de la contraseña
+        self.result_label = QLabel("Contraseña Generada:")
+        self.result_label.setFont(font_label)
+        self.password_result = QLineEdit(self)
+        self.password_result.setReadOnly(True)
+        self.password_result.setFont(font_input)
+        self.password_result.setStyleSheet(
+            "padding: 15px; background-color: #e0e0e0; border-radius: 10px;"
+        )
+
+        # Nivel de seguridad
+        self.strength_label = QLabel("", self)
+        self.strength_label.setAlignment(Qt.AlignCenter)
+        self.strength_label.setFont(QFont("Poppins", 18, QFont.Bold))
+
+        # Layout principal
+        layout = QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.password_manager_btn)  # Botón de Gestor de Contraseñas
+        layout.addWidget(self.name_input)
+        layout.addWidget(self.paternal_lastname_input)
+        layout.addWidget(self.maternal_lastname_input)
+        layout.addWidget(self.birthdate_label)
+        layout.addWidget(self.birthdate_input)
+        layout.addWidget(self.song_input)
+        layout.addWidget(self.pet_input)
+        layout.addWidget(self.length_label)
+        layout.addWidget(self.password_length)
+        layout.addLayout(button_layout)
+        layout.addWidget(self.result_label)
+        layout.addWidget(self.password_result)
+        layout.addWidget(self.strength_label)
+        layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        self.setLayout(layout)
+
+    def create_input(self, placeholder, font):
+        """Crea campos de entrada con placeholders."""
+        input_field = QLineEdit(self)
+        input_field.setPlaceholderText(placeholder)
+        input_field.setFont(font)
+        input_field.setStyleSheet("padding: 10px; margin-bottom: 15px;")
+        return input_field
+
+    def validate_fields(self):
+        """Valida que los campos estén completos."""
+        return all([
+            self.name_input.text(), self.paternal_lastname_input.text(),
+            self.maternal_lastname_input.text(), self.song_input.text(),
+            self.pet_input.text()
+        ])
+
+    def show_error(self, message):
+        """Muestra un mensaje de error."""
+        QMessageBox.critical(self, "Error", message)
+
+    def generate_password(self):
+        """Genera una contraseña segura basada en los campos ingresados."""
+        if not self.validate_fields():
+            self.show_error("Debes completar todos los campos.")
+            return
+
+        length = int(self.password_length.currentText())
+        all_fields = [
+            self.name_input.text(), self.paternal_lastname_input.text(),
+            self.maternal_lastname_input.text(), self.birthdate_input.text(),
+            self.song_input.text(), self.pet_input.text()
+        ]
+
+        # Generar contraseña a partir de los campos ingresados
+        password = ''
+        while len(password) < length:
+            random_field = random.choice(all_fields)
+            random_char = random.choice(random_field)
+            password += random_char.upper() if random.random() > 0.5 else random_char.lower()
+            if len(password) < length and random.random() > 0.7:
+                password += random.choice(string.punctuation)
+
+        self.password_result.setText(password[:length])
+        self.evaluate_security(length)
+        self.ask_to_save_password(password[:length])
+
+    def generate_xkcd_password(self):
+        """Genera una contraseña tipo XKCD respetando la longitud seleccionada."""
+        length = int(self.password_length.currentText())
+        words = []
+        while len(''.join(words)) < length:
+            words.append(random.choice(xkcd_palabras))
+
+        password = ''.join(words)[:length]
+        self.password_result.setText(password)
+        self.evaluate_security(length)
+        self.ask_to_save_password(password)
+
+    def evaluate_security(self, length):
+        """Evalúa el nivel de seguridad."""
+        if length < 16:
+            self.strength_label.setText("Nivel de seguridad: Segura")
+        elif length < 20:
+            self.strength_label.setText("Nivel de seguridad: Mega segura")
+        else:
+            self.strength_label.setText("Nivel de seguridad: Ultra segura")
+
+    def ask_to_save_password(self, password):
+        """Pregunta si se desea guardar la contraseña generada."""
+        reply = QMessageBox.question(self, "Guardar Contraseña", 
+                                     "¿Quieres guardar esta contraseña?", 
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            site_name, ok = QInputDialog.getText(self, "Guardar Contraseña", "Nombre del sitio:")
+            if ok and site_name:
+                self.save_password(site_name, password)
+
+    def save_password(self, site_name, password):
+        """Envía la contraseña y el nombre del sitio a la base de datos."""
+        data = {
+            "id_usuario": self.user_id,
+            "nombredelsitio": site_name,
+            "contrasena": password
+        }
+        try:
+            response = requests.post("http://localhost/python/guardar_contrasena.php", data=data)
+            if response.status_code == 200:
+                QMessageBox.information(self, "Éxito", "Contraseña guardada exitosamente.")
+            else:
+                QMessageBox.critical(self, "Error", "Error al guardar la contraseña.")
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+    def open_password_manager(self):
+        """Abre el archivo gestordecontrasenas.py con el ID del usuario."""
+        subprocess.Popen(["python", "gestordecontrasenas.py", str(self.user_id)])
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    apply_stylesheet(app, theme='dark_blue.xml')
+
+    # Estilos personalizados adicionales
+    custom_styles = """
+        QLineEdit { color: white; }
+        QLabel { color: white; }
+        QPushButton { color: white; }
+        QLineEdit:placeholder { color: gray; }
+    """
+    app.setStyleSheet(app.styleSheet() + custom_styles)
+
+    window = PasswordGeneratorApp(1)  # ID de usuario de prueba
+    window.show()
+    sys.exit(app.exec_())
