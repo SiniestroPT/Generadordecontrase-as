@@ -1,0 +1,215 @@
+import sys
+import requests
+import random
+import string
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLineEdit, QMessageBox, QScrollArea, QFrame
+)
+from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt
+from qt_material import apply_stylesheet
+
+# 500 palabras tipo XKCD generadas aleatoriamente
+xkcd_palabras = [
+    ''.join(random.choice(string.ascii_letters + string.punctuation) 
+            for _ in range(random.randint(5, 10)))
+    for _ in range(500)
+]
+
+class PasswordManagerApp(QWidget):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id
+        self.setWindowTitle(f"Gestor de Contraseñas - Usuario {user_id}")
+        self.setGeometry(100, 100, 800, 600)
+
+        # Estilo de fuente
+        font_title = QFont("Poppins", 28, QFont.Bold)
+        font_label = QFont("Poppins", 16)
+        font_button = QFont("Poppins", 14, QFont.Bold)
+
+        # Título
+        self.title_label = QLabel("🔑 Gestor de Contraseñas")
+        self.title_label.setFont(font_title)
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("margin-bottom: 20px;")
+
+        # Área de scroll para las contraseñas
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+
+        # Contenedor para las contraseñas
+        self.container_widget = QWidget()
+        self.container_layout = QVBoxLayout(self.container_widget)
+
+        self.scroll_area.setWidget(self.container_widget)
+
+        # Layout principal
+        layout = QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.scroll_area)
+        self.setLayout(layout)
+
+        self.load_passwords()
+
+    def load_passwords(self):
+        """Carga las contraseñas del usuario desde la base de datos y las muestra."""
+        try:
+            response = requests.post("http://localhost/python/mostrar_contrasenas.php", data={"id_usuario": self.user_id})
+            if response.status_code == 200:
+                passwords = response.json()
+                self.display_passwords(passwords)
+            else:
+                QMessageBox.critical(self, "Error", "Error al cargar las contraseñas.")
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+    def display_passwords(self, passwords):
+        """Muestra las contraseñas del usuario en secciones con opciones para mostrar/ocultar, modificar o eliminar."""
+        # Limpiar el layout actual de contraseñas antes de cargar nuevas
+        for i in reversed(range(self.container_layout.count())):
+            widget = self.container_layout.itemAt(i).widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        # Agregar contraseñas al layout
+        for password_data in passwords:
+            site_name = password_data['nombredelsitio']
+            password = password_data['contrasenasalmacenadas']
+            password_id = password_data['id']
+
+            # Sección para cada contraseña
+            section = QFrame()
+            section_layout = QVBoxLayout(section)
+            section.setFrameShape(QFrame.StyledPanel)
+            section.setStyleSheet("margin-bottom: 15px; padding: 15px; border-radius: 10px; background-color: #1c1a1a;")
+
+            # Nombre del sitio
+            site_label = QLabel(f"🔹 Sitio: {site_name}")
+            site_label.setFont(QFont("Poppins", 30, QFont.Bold))
+            section_layout.addWidget(site_label)
+
+            # Contraseña (en campo de solo lectura con botón para ver/ocultar)
+            password_input = QLineEdit(password)
+            password_input.setFont(QFont("Poppins", 14))
+            password_input.setEchoMode(QLineEdit.Password)
+            password_input.setReadOnly(True)
+
+            toggle_visibility_btn = QPushButton("Mostrar")
+            toggle_visibility_btn.setFont(QFont("Poppins", 12))
+            toggle_visibility_btn.setCheckable(True)
+            toggle_visibility_btn.toggled.connect(lambda checked, pw_input=password_input, btn=toggle_visibility_btn: self.toggle_password_visibility(checked, pw_input, btn))
+
+            # Layout para la contraseña y el botón de visibilidad
+            password_layout = QHBoxLayout()
+            password_layout.addWidget(password_input)
+            password_layout.addWidget(toggle_visibility_btn)
+            section_layout.addLayout(password_layout)
+
+            # Botones de Modificar y Eliminar
+            button_layout = QHBoxLayout()
+            modify_button = QPushButton("Modificar")
+            modify_button.setFont(QFont("Poppins", 12, QFont.Bold))
+            modify_button.clicked.connect(lambda _, pid=password_id, pname=site_name: self.modify_password(pid, pname))
+
+            delete_button = QPushButton("Eliminar")
+            delete_button.setFont(QFont("Poppins", 12, QFont.Bold))
+            delete_button.clicked.connect(lambda _, pid=password_id: self.delete_password(pid))
+
+            button_layout.addWidget(modify_button)
+            button_layout.addWidget(delete_button)
+            section_layout.addLayout(button_layout)
+
+            # Añadir la sección al layout del contenedor
+            self.container_layout.addWidget(section)
+
+    def toggle_password_visibility(self, checked, password_input, button):
+        """Alterna la visibilidad de la contraseña y cambia el color del texto."""
+        if checked:
+            password_input.setEchoMode(QLineEdit.Normal)
+            password_input.setStyleSheet("color: white;")  # Texto en blanco
+            button.setText("Ocultar")
+        else:
+            password_input.setEchoMode(QLineEdit.Password)
+            password_input.setStyleSheet("")  # Restablecer el estilo predeterminado
+            button.setText("Mostrar")
+
+    def modify_password(self, password_id, site_name):
+        """Genera una nueva contraseña estilo XKCD y pregunta si se desea guardar."""
+        new_password = self.generate_xkcd_password()
+        
+        # Muestra la contraseña generada y pide confirmación para guardarla o generar otra
+        while True:
+            reply = QMessageBox.question(self, f"Modificar Contraseña - {site_name}", 
+                                         f"Contraseña generada: {new_password}\n\n¿Quieres guardar esta contraseña?",
+                                         QMessageBox.Yes | QMessageBox.No | QMessageBox.Retry)
+            
+            if reply == QMessageBox.Yes:
+                self.update_password(password_id, new_password)
+                break
+            elif reply == QMessageBox.No:
+                break
+            elif reply == QMessageBox.Retry:
+                # Genera otra contraseña
+                new_password = self.generate_xkcd_password()
+
+    def generate_xkcd_password(self, length=16):
+        """Genera una contraseña estilo XKCD con una longitud de palabras que se ajuste al valor dado."""
+        words = []
+        while len(''.join(words)) < length:
+            words.append(random.choice(xkcd_palabras))
+        return ''.join(words)[:length]
+
+    def update_password(self, password_id, new_password):
+        """Envía la nueva contraseña al servidor para actualizarla en la base de datos."""
+        data = {
+            "id": password_id,
+            "nueva_contrasena": new_password
+        }
+        try:
+            response = requests.post("http://localhost/python/actualizar_contrasena.php", data=data)
+            if response.status_code == 200:
+                QMessageBox.information(self, "Éxito", "Contraseña actualizada exitosamente.")
+                self.load_passwords()  # Recargar las contraseñas
+            else:
+                QMessageBox.critical(self, "Error", "Error al actualizar la contraseña.")
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+    def delete_password(self, password_id):
+        """Elimina la contraseña de un sitio en la base de datos."""
+        reply = QMessageBox.question(self, "Eliminar Contraseña", "¿Estás seguro de que quieres eliminar esta contraseña?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                response = requests.post("http://localhost/python/eliminar_contrasena.php", data={"id": password_id})
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Éxito", "Contraseña eliminada exitosamente.")
+                    self.load_passwords()  # Recargar las contraseñas
+                else:
+                    QMessageBox.critical(self, "Error", "Error al eliminar la contraseña.")
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Error", f"Error en la conexión: {str(e)}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    apply_stylesheet(app, theme='dark_blue.xml')
+
+    # Estilos personalizados adicionales
+    custom_styles = """
+        QLineEdit { color: white; }
+        QLabel { color: white; }
+        QPushButton { color: white; }
+        QLineEdit:placeholder { color: gray; }
+    """
+    app.setStyleSheet(app.styleSheet() + custom_styles)
+
+    user_id = int(sys.argv[1]) if len(sys.argv) > 1 else None
+    if user_id is None:
+        QMessageBox.critical(None, "Error", "ID de usuario no proporcionado.")
+        sys.exit(1)
+
+    window = PasswordManagerApp(user_id)
+    window.show()
+    sys.exit(app.exec_())
+
